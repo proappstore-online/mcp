@@ -52,6 +52,32 @@ async function ghApi(
   return { ok: res.ok, status: res.status, data };
 }
 
+/** Verify the calling user owns the app via the PAS API. */
+async function verifyAppOwnership(
+  apiBase: string,
+  userToken: string,
+  appId: string,
+): Promise<boolean> {
+  try {
+    const res = await fetch(`${apiBase}/v1/apps`, {
+      headers: { Authorization: `Bearer ${userToken}` },
+    });
+    if (!res.ok) return false;
+    const data = (await res.json()) as { apps?: { id: string }[] };
+    return (data.apps ?? []).some((a) => a.id === appId);
+  } catch {
+    return false;
+  }
+}
+
+function authError(): { content: { type: "text"; text: string }[] } {
+  return { content: [{ type: "text" as const, text: "Error: authentication required. Connect with a session token." }] };
+}
+
+function ownershipError(appId: string): { content: { type: "text"; text: string }[] } {
+  return { content: [{ type: "text" as const, text: `Error: you don't own app "${appId}". Only the app owner can use project tools on it.` }] };
+}
+
 /**
  * Register project-building tools on the MCP server.
  */
@@ -176,6 +202,10 @@ export function registerProjectTools(
       message: z.string().optional().describe("Commit message (auto-generated if omitted)"),
     },
     async ({ app_id, path, content, message }) => {
+      const { userId, token: userToken } = getUserContext();
+      if (!userToken) return authError();
+      if (!await verifyAppOwnership(apiBase, userToken, app_id)) return ownershipError(app_id);
+
       // Check if file exists (need SHA for update)
       const existRes = await ghApi(ghToken, `/repos/${org}/${app_id}/contents/${path}`);
       const sha = existRes.ok ? (existRes.data as GitHubContent).sha : undefined;
@@ -206,6 +236,10 @@ export function registerProjectTools(
       path: z.string().describe("File path relative to repo root"),
     },
     async ({ app_id, path }) => {
+      const { token: userToken } = getUserContext();
+      if (!userToken) return authError();
+      if (!await verifyAppOwnership(apiBase, userToken, app_id)) return ownershipError(app_id);
+
       const res = await ghApi(ghToken, `/repos/${org}/${app_id}/contents/${path}`);
       if (!res.ok) {
         return { content: [{ type: "text" as const, text: `File not found: ${path} (${res.status})` }] };
@@ -225,6 +259,10 @@ export function registerProjectTools(
       path: z.string().optional().describe("Subdirectory path (default: repo root)"),
     },
     async ({ app_id, path }) => {
+      const { token: userToken } = getUserContext();
+      if (!userToken) return authError();
+      if (!await verifyAppOwnership(apiBase, userToken, app_id)) return ownershipError(app_id);
+
       const dirPath = path ?? "";
       const res = await ghApi(ghToken, `/repos/${org}/${app_id}/contents/${dirPath}`);
       if (!res.ok) {
@@ -248,6 +286,10 @@ export function registerProjectTools(
       message: z.string().optional().describe("Commit message"),
     },
     async ({ app_id, path, message }) => {
+      const { token: userToken } = getUserContext();
+      if (!userToken) return authError();
+      if (!await verifyAppOwnership(apiBase, userToken, app_id)) return ownershipError(app_id);
+
       const existRes = await ghApi(ghToken, `/repos/${org}/${app_id}/contents/${path}`);
       if (!existRes.ok) {
         return { content: [{ type: "text" as const, text: `File not found: ${path}` }] };
@@ -275,6 +317,10 @@ export function registerProjectTools(
       query: z.string().describe("Search text (case-insensitive)"),
     },
     async ({ app_id, query }) => {
+      const { token: userToken } = getUserContext();
+      if (!userToken) return authError();
+      if (!await verifyAppOwnership(apiBase, userToken, app_id)) return ownershipError(app_id);
+
       const res = await ghApi(
         ghToken,
         `/search/code?q=${encodeURIComponent(query)}+repo:${org}/${app_id}`,
@@ -306,6 +352,10 @@ export function registerProjectTools(
       app_id: z.string().describe("App ID"),
     },
     async ({ app_id }) => {
+      const { token: userToken } = getUserContext();
+      if (!userToken) return authError();
+      if (!await verifyAppOwnership(apiBase, userToken, app_id)) return ownershipError(app_id);
+
       const res = await ghApi(ghToken, `/repos/${org}/${app_id}/actions/runs?per_page=3`);
       if (!res.ok) {
         return { content: [{ type: "text" as const, text: `Error: ${res.status}` }] };
@@ -377,6 +427,10 @@ export function registerProjectTools(
       message: z.string().describe("Commit message"),
     },
     async ({ app_id, files, message }) => {
+      const { token: userToken } = getUserContext();
+      if (!userToken) return authError();
+      if (!await verifyAppOwnership(apiBase, userToken, app_id)) return ownershipError(app_id);
+
       // Get current commit SHA
       const refRes = await ghApi(ghToken, `/repos/${org}/${app_id}/git/ref/heads/main`);
       if (!refRes.ok) {
