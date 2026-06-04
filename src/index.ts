@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { fetchTools, registerAppTools } from "./tool-loader.js";
 import { registerProjectTools } from "./project-tools.js";
+import { registerAgentsTools } from "./agents-tools.js";
 
 interface Env {
   API_BASE: string;
@@ -339,6 +340,12 @@ Full docs: https://proappstore.online/docs/ui`,
       token: this.userToken,
     }));
 
+    // ── Agent-team introspection tools ───────────────────────────
+    registerAgentsTools(this.server, () => ({
+      userId: this.userId,
+      token: this.userToken,
+    }));
+
     // ── Load and register app tools dynamically ────────────────
     const appTools = await fetchTools(this.env.API_BASE);
     const registered = registerAppTools(
@@ -400,7 +407,7 @@ export default {
 
     if (url.pathname === "/" || url.pathname === "") {
       return new Response(
-        "ProAppStore MCP Server\n\nConnect: npx mcp-remote https://mcp.proappstore.online/mcp\n\nPlatform tools: list_apps, deploy_status, app_info, platform_guide, sdk_reference, discover_tools\nProject tools: scaffold_app, write_file, read_file, list_files, delete_file, search_files, batch_write_files, get_deploy_status, provision_app\nApp tools: dynamically loaded from app manifests (use discover_tools to see available)\n",
+        "ProAppStore MCP Server\n\nConnect: npx mcp-remote https://mcp.proappstore.online/mcp\n\nPlatform tools: list_apps, deploy_status, app_info, platform_guide, sdk_reference, discover_tools\nProject tools: scaffold_app, write_file, read_file, list_files, delete_file, search_files, batch_write_files, get_deploy_status, provision_app\nAgent tools: agent_project_status, agent_board, agent_activity, agent_ticket_detail, agent_cost\nApp tools: dynamically loaded from app manifests (use discover_tools to see available)\n",
         { headers: { "content-type": "text/plain" } }
       );
     }
