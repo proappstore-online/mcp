@@ -11,16 +11,25 @@ import { z } from "zod";
 
 const AGENTS_API = "https://agents.proappstore.online";
 
+/**
+ * Call the agents API. Prefers the user's session token; falls back to the
+ * internal service token (X-Internal-Token) so the MCP tools work even when
+ * the caller didn't connect with auth (e.g. Claude Code via mcp-remote).
+ */
 async function agentsApi(
   path: string,
-  token: string,
+  userToken: string | null,
+  internalToken: string | null,
 ): Promise<{ ok: boolean; status: number; data: unknown }> {
-  const res = await fetch(`${AGENTS_API}${path}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/json",
-    },
-  });
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (userToken) {
+    headers.Authorization = `Bearer ${userToken}`;
+  } else if (internalToken) {
+    headers["X-Internal-Token"] = internalToken;
+  } else {
+    return { ok: false, status: 401, data: { error: "no auth available" } };
+  }
+  const res = await fetch(`${AGENTS_API}${path}`, { headers });
   let data: unknown;
   try {
     data = await res.json();
@@ -30,17 +39,6 @@ async function agentsApi(
   return { ok: res.ok, status: res.status, data };
 }
 
-function noAuth(): { content: { type: "text"; text: string }[] } {
-  return {
-    content: [
-      {
-        type: "text" as const,
-        text: "Error: authentication required. Connect with a session token.",
-      },
-    ],
-  };
-}
-
 function txt(text: string) {
   return { content: [{ type: "text" as const, text }] };
 }
@@ -48,6 +46,7 @@ function txt(text: string) {
 export function registerAgentsTools(
   server: McpServer,
   getUserContext: () => { userId: string | null; token: string | null },
+  internalToken: string | null,
 ): void {
   // ── agent_project_status ────────────────────────────────────
   server.tool(
@@ -56,8 +55,7 @@ export function registerAgentsTools(
     { app_id: z.string().describe("App ID (slug)") },
     async ({ app_id }) => {
       const { token } = getUserContext();
-      if (!token) return noAuth();
-      const r = await agentsApi(`/v1/projects/${app_id}`, token);
+      const r = await agentsApi(`/v1/projects/${app_id}`, token, internalToken);
       if (!r.ok) {
         if (r.status === 404) return txt(`No agent team found for "${app_id}". Start one from the console.`);
         return txt(`Error: ${r.status} ${JSON.stringify(r.data)}`);
@@ -82,10 +80,9 @@ export function registerAgentsTools(
     { app_id: z.string().describe("App ID (slug)") },
     async ({ app_id }) => {
       const { token } = getUserContext();
-      if (!token) return noAuth();
       const [projR, ticketsR] = await Promise.all([
-        agentsApi(`/v1/projects/${app_id}`, token),
-        agentsApi(`/v1/projects/${app_id}/tickets`, token),
+        agentsApi(`/v1/projects/${app_id}`, token, internalToken),
+        agentsApi(`/v1/projects/${app_id}/tickets`, token, internalToken),
       ]);
       if (!projR.ok) return txt(`Error fetching project: ${projR.status}`);
       if (!ticketsR.ok) return txt(`Error fetching tickets: ${ticketsR.status}`);
@@ -142,8 +139,7 @@ export function registerAgentsTools(
     },
     async ({ app_id, last }) => {
       const { token } = getUserContext();
-      if (!token) return noAuth();
-      const r = await agentsApi(`/v1/projects/${app_id}/activity`, token);
+      const r = await agentsApi(`/v1/projects/${app_id}/activity`, token, internalToken);
       if (!r.ok) return txt(`Error: ${r.status}`);
 
       let entries = ((r.data as { activity: unknown[] }).activity ?? []) as Array<{
@@ -170,10 +166,9 @@ export function registerAgentsTools(
     },
     async ({ app_id, ticket_seq }) => {
       const { token } = getUserContext();
-      if (!token) return noAuth();
 
       // First get the ticket list to find the ID from seq
-      const ticketsR = await agentsApi(`/v1/projects/${app_id}/tickets`, token);
+      const ticketsR = await agentsApi(`/v1/projects/${app_id}/tickets`, token, internalToken);
       if (!ticketsR.ok) return txt(`Error: ${ticketsR.status}`);
       const tickets = ((ticketsR.data as { tickets: unknown[] }).tickets ?? []) as Array<{
         id: string; seq: number; title: string; status: string;
@@ -184,7 +179,7 @@ export function registerAgentsTools(
       if (!ticket) return txt(`Ticket #${ticket_seq} not found. Available: ${tickets.map((t) => `#${t.seq}`).join(", ") || "none"}`);
 
       // Get messages
-      const msgsR = await agentsApi(`/v1/projects/${app_id}/tickets/${ticket.id}/messages`, token);
+      const msgsR = await agentsApi(`/v1/projects/${app_id}/tickets/${ticket.id}/messages`, token, internalToken);
       const messages = msgsR.ok
         ? (((msgsR.data as { messages: unknown[] }).messages ?? []) as Array<{
             id: string; author: string; body: string; createdAt: number;
@@ -216,8 +211,7 @@ export function registerAgentsTools(
     { app_id: z.string().describe("App ID (slug)") },
     async ({ app_id }) => {
       const { token } = getUserContext();
-      if (!token) return noAuth();
-      const r = await agentsApi(`/v1/projects/${app_id}/cost`, token);
+      const r = await agentsApi(`/v1/projects/${app_id}/cost`, token, internalToken);
       if (!r.ok) return txt(`Error: ${r.status}`);
       return txt(JSON.stringify(r.data, null, 2));
     },

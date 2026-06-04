@@ -9,6 +9,8 @@ interface Env {
   API_BASE: string;
   GITHUB_ORG: string;
   GITHUB_TOKEN: string;
+  /** Shared secret for service-to-service calls to the agents Worker. */
+  INTERNAL_TOKEN?: string;
 }
 
 async function getDeployStatus(org: string, appId: string) {
@@ -341,10 +343,11 @@ Full docs: https://proappstore.online/docs/ui`,
     }));
 
     // ── Agent-team introspection tools ───────────────────────────
-    registerAgentsTools(this.server, () => ({
-      userId: this.userId,
-      token: this.userToken,
-    }));
+    registerAgentsTools(
+      this.server,
+      () => ({ userId: this.userId, token: this.userToken }),
+      this.env.INTERNAL_TOKEN ?? null,
+    );
 
     // ── Load and register app tools dynamically ────────────────
     const appTools = await fetchTools(this.env.API_BASE);
